@@ -8,16 +8,20 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.sql.*;
+import java.util.Base64;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import java.security.SecureRandom;
 
 @Service
 public class BankService {
     private final UserRepository userRepo;
     private final SessionRepository sessionRepo;
+    private static final SecureRandom secureRandom = new SecureRandom();
+    private static final Base64.Encoder base64Encoder = Base64.getUrlEncoder().withoutPadding();
 
-    private static final Pattern USER_PATTERN = Pattern.compile("^[_\\-\\.0-9a-z]{1,127}$");
+    private static final Pattern USER_PATTERN = Pattern.compile("^[_\\-\\.0-9a-zA-Z]{1,127}$");
     private static final Pattern INT_PATTERN = Pattern.compile("^(0|[1-9][0-9]*)$");
     private static final Pattern FRAC_PATTERN = Pattern.compile("^[0-9]{2}$");
 
@@ -28,7 +32,7 @@ public class BankService {
 
     public String register(String username, String password, String balanceStr) {
         if(balanceStr != null){
-            if (!validUser(username) || !validUser(password) || !validAmount(balanceStr)) return "invalid_input";
+            if (!validUser(username) || !validUser(password) || !validAmount(balanceStr)|| !isStrongPassword(password)) return "invalid_input";
         }
         if (userRepo.findByUsername(username).isPresent()) return "invalid_input";
 
@@ -43,34 +47,15 @@ public class BankService {
     }
 
     public String login(String username, String password) {
-//        Optional<User> user = userRepo.findByUsernameAndPassword(username, password);
-//        if (user.isEmpty()) return "invalid_input";
+        Optional<User> user = userRepo.findByUsernameAndPassword(username, password);
+        if (user.isEmpty()) return "invalid_input";
+        String token = generateSecureToken();
+        Session session = new Session();
+        session.setToken(token);
+        session.setUser(user.get());
+        sessionRepo.save(session);
 
-
-        //To do: change only for testing
-        try (Connection conn = DriverManager.getConnection("jdbc:mysql://localhost:3306/bank_app?useSSL=false&serverTimezone=UTC", "root", "")) {
-            System.out.println("SELECT * FROM users WHERE username = '" + username + "' AND password = '" + password + "'");
-            String sql = "SELECT * FROM users WHERE username = '" + username + "' AND password = '" + password + "'";
-            Statement stmt = conn.createStatement();
-            ResultSet rs = stmt.executeQuery(sql);
-
-            if (rs.next()) {
-                System.out.println("in here");
-                String token = UUID.randomUUID().toString();
-                Session session = new Session();
-                session.setToken(token);
-                System.out.println(rs.getString(2) +  rs.getString(3));
-                Optional<User> user = userRepo.findByUsernameAndPassword(rs.getString(2), rs.getString(3));
-                session.setUser(user.get());
-                sessionRepo.save(session);
-                return token;
-            } else {
-                return "invalid_input";
-            }
-        } catch (SQLException e) {
-            System.out.println(e);
-            return "invalid_input";
-        }
+        return "registered";
 
     }
 
@@ -98,6 +83,23 @@ public class BankService {
         user.setBalance(user.getBalance().subtract(amount));
         userRepo.save(user);
         return user.getBalance().toPlainString();
+    }
+
+    private boolean isStrongPassword(String password) {
+        if (password == null) return false;
+        if (password.length() < 8) return false;
+        System.out.println("sdsf");
+        boolean hasUpper = false;
+        boolean hasLower = false;
+        boolean hasDigit = false;
+
+        for (char ch : password.toCharArray()) {
+            if (Character.isUpperCase(ch)) hasUpper = true;
+            else if (Character.isLowerCase(ch)) hasLower = true;
+            else if (Character.isDigit(ch)) hasDigit = true;
+        }
+
+        return hasUpper && hasLower && hasDigit;
     }
 
     public String balance(String token) {
@@ -157,5 +159,11 @@ public class BankService {
         } catch (SQLException e) {
             return "DB error";
         }
+    }
+
+    private String generateSecureToken() {
+        byte[] randomBytes = new byte[32];
+        secureRandom.nextBytes(randomBytes);
+        return base64Encoder.encodeToString(randomBytes);
     }
 }
